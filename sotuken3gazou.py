@@ -460,7 +460,7 @@ def generate_bulk_csv_data(reports: List[ImageReport]) -> bytes:
 # Streamlit アプリケーションのメイン
 # ----------------------------
 
-st.title("印刷用画像一括チェックアプリ v5.0 ")
+st.title("印刷用画像一括チェックアプリ")
 st.caption(f"DPI比較許容誤差: **±{DPI_TOLERANCE}dpi**")
 
 # ✅ QR（落ちない版）
@@ -665,4 +665,5 @@ if uploaded_files:
         st.error("アップロードされたファイルで解析に成功したものはありませんでした。ファイル形式を確認してください。")
 else:
     st.info("ファイルをアップロードしてチェックを開始してください。")
+
 
