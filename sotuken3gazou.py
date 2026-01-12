@@ -12,7 +12,7 @@ import math
 import qrcode
 
 # スマホでも見やすいレイアウト
-st.set_page_config(page_title="印刷用画像一括チェックアプリ v5.0", layout="centered")
+st.set_page_config(page_title="印刷用画像一括チェックアプリ ", layout="centered")
 
 # OpenCVのチェックはそのまま
 try:
@@ -665,3 +665,4 @@ if uploaded_files:
         st.error("アップロードされたファイルで解析に成功したものはありませんでした。ファイル形式を確認してください。")
 else:
     st.info("ファイルをアップロードしてチェックを開始してください。")
+
