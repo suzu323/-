@@ -12,7 +12,7 @@ import math
 import qrcode
 
 # スマホでも見やすいレイアウト
-st.set_page_config(page_title="印刷用画像一括チェックアプリ ", layout="centered")
+st.set_page_config(page_title="印刷要件一括検査ツール ", layout="centered")
 
 # OpenCVのチェックはそのまま
 try:
@@ -460,7 +460,7 @@ def generate_bulk_csv_data(reports: List[ImageReport]) -> bytes:
 # Streamlit アプリケーションのメイン
 # ----------------------------
 
-st.title("印刷用画像一括チェックアプリ")
+st.title("印刷要件一括検査ツール")
 st.caption(f"DPI比較許容誤差: **±{DPI_TOLERANCE}dpi**")
 
 # ✅ QR（落ちない版）
@@ -665,5 +665,6 @@ if uploaded_files:
         st.error("アップロードされたファイルで解析に成功したものはありませんでした。ファイル形式を確認してください。")
 else:
     st.info("ファイルをアップロードしてチェックを開始してください。")
+
 
 
