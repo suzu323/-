@@ -14,13 +14,6 @@ import qrcode
 # スマホでも見やすいレイアウト
 st.set_page_config(page_title="印刷要件一括検査ツール ", layout="centered")
 
-# OpenCVのチェックはそのまま
-try:
-    import cv2
-    _HAS_CV2 = True
-except ImportError:
-    _HAS_CV2 = False
-
 # DPI比較用の許容誤差 (厳密な一致にわずかな遊びを持たせる)
 DPI_TOLERANCE = 1.0
 
@@ -55,7 +48,6 @@ class CheckConditions:
     required_dpi: Optional[int] = None
     min_width_mm: Optional[float] = None
     min_height_mm: Optional[float] = None
-    require_trim: bool = False
     allowed_extensions: Optional[Set[str]] = None
     skip_all_checks: bool = False
     size_check_mode: str = SIZE_CHECK_MODE_BOTH
@@ -75,8 +67,6 @@ class ImageReport:
     color_family: str
     has_alpha: bool
     icc_profile: Optional[str]
-    trim_marks_detected: Optional[bool]
-    trim_marks_score: Optional[float]
     detected_extension: str
     notes: List[str]
     passed: bool = False
@@ -121,36 +111,6 @@ def _mm_size(width_px: int, height_px: int, dpi: Tuple[Optional[float], Optional
     if xdpi and ydpi and xdpi > 0 and ydpi > 0:
         return (width_px / xdpi) * 25.4, (height_px / ydpi) * 25.4
     return None, None
-
-
-def _detect_trim_marks(img: Image.Image) -> Tuple[Optional[bool], Optional[float]]:
-    if not _HAS_CV2:
-        return None, None
-    try:
-        g = np.array(img.convert("L"))
-        h, w = g.shape
-        margin_h, margin_w = max(5, int(h * 0.05)), max(5, int(w * 0.05))
-        corners = [
-            g[:margin_h, :margin_w],
-            g[:margin_h, -margin_w:],
-            g[-margin_h:, :margin_w],
-            g[-margin_h:, -margin_w:]
-        ]
-        total_lines = 0
-        for corner in corners:
-            edges = cv2.Canny(corner, 150, 250)
-            lines = cv2.HoughLinesP(
-                edges, 1, np.pi / 180,
-                threshold=40, minLineLength=20, maxLineGap=5
-            )
-            if lines is not None:
-                total_lines += len(lines)
-
-        score = min(1.0, total_lines / 4.0)
-        detected = score > 0.4
-        return detected, score
-    except Exception:
-        return None, None
 
 
 def _check_size_match(
@@ -208,11 +168,19 @@ def analyze_image_file(
         img = Image.open(img_data)
     except Exception as e:
         return ImageReport(
-            path=file_name, width_px=0, height_px=0, dpi=(None, None), width_mm=None, height_mm=None,
-            mode="Error", color_family="Unknown", has_alpha=False, icc_profile=None,
-            trim_marks_detected=None, trim_marks_score=None,
+            path=file_name,
+            width_px=0,
+            height_px=0,
+            dpi=(None, None),
+            width_mm=None,
+            height_mm=None,
+            mode="Error",
+            color_family="Unknown",
+            has_alpha=False,
+            icc_profile=None,
+            detected_extension=detected_ext,
             notes=[f"画像を開くエラー: {e}"],
-            detected_extension=detected_ext, passed=False
+            passed=False
         )
 
     img = ImageOps.exif_transpose(img)
@@ -226,7 +194,6 @@ def analyze_image_file(
     family = _guess_color_family(img)
     has_alpha = "A" in img.mode
     icc = img.info.get("icc_profile")
-    trim_detected, trim_score = _detect_trim_marks(img)
 
     notes: List[str] = []
     passed = True
@@ -235,7 +202,9 @@ def analyze_image_file(
     ext_passed = True
     if cond.allowed_extensions and not cond.skip_all_checks:
         if detected_ext not in cond.allowed_extensions:
-            notes.append(f"形式: 不一致 (検出={detected_ext.upper()} / 許容={', '.join(cond.allowed_extensions).upper()}) -> ❌ 不合格")
+            notes.append(
+                f"形式: 不一致 (検出={detected_ext.upper()} / 許容={', '.join(cond.allowed_extensions).upper()}) -> ❌ 不合格"
+            )
             passed = False
             ext_passed = False
         else:
@@ -261,7 +230,9 @@ def analyze_image_file(
         dpi_value = dpi[0] if dpi[0] is not None else None
         if cond.required_dpi:
             if dpi_value is None or not math.isclose(dpi_value, cond.required_dpi, abs_tol=DPI_TOLERANCE):
-                notes.append(f"DPI: 不一致/不明 (検出={'不明' if dpi_value is None else f'{dpi_value:.0f}'} vs 指定={cond.required_dpi:.0f}) -> ❌ 不合格")
+                notes.append(
+                    f"DPI: 不一致/不明 (検出={'不明' if dpi_value is None else f'{dpi_value:.0f}'} vs 指定={cond.required_dpi:.0f}) -> ❌ 不合格"
+                )
                 passed = False
             else:
                 notes.append(f"DPI: 合格 (検出={dpi_value:.0f})")
@@ -288,41 +259,16 @@ def analyze_image_file(
                 if not size_passed:
                     req_w_str = f"{cond.min_width_mm:.1f}" if cond.min_width_mm else "Any"
                     req_h_str = f"{cond.min_height_mm:.1f}" if cond.min_height_mm else "Any"
-                    notes.append(f"幅/高さ: 指定 ({req_w_str}x{req_h_str}mm, 許容誤差±{cond.size_tolerance_mm:.1f}mm) と不一致 -> ❌ 不合格")
+                    notes.append(
+                        f"幅/高さ: 指定 ({req_w_str}x{req_h_str}mm, 許容誤差±{cond.size_tolerance_mm:.1f}mm) と不一致 -> ❌ 不合格"
+                    )
                     passed = False
                 else:
                     notes.append(f"幅/高さ: 合格 (検出={width_mm:.1f}x{height_mm:.1f}mm)")
         else:
-            notes.append(f"幅/高さ: 指定なし (検出={'不明' if width_mm is None else f'W{width_mm:.1f} x H{height_mm:.1f}mm'})")
-
-        # トンボチェック
-        if cond.require_trim:
-            if _HAS_CV2:
-                if trim_detected is None:
-                    notes.append("トンボ: 検出エラー -> ❌ 不合格")
-                    passed = False
-                elif not trim_detected:
-                    notes.append(f"トンボ: 不検出 (スコア={trim_score:.2f}) -> ❌ 不合格")
-                    passed = False
-                else:
-                    notes.append(f"トンボ: 検出 (スコア={trim_score:.2f})")
-            else:
-                dpi_value = dpi[0] if dpi[0] is not None else None
-                is_print_ready = (
-                    dpi_value is not None and dpi_value >= 300 and
-                    family in ["CMYK", "グレースケール", "RGB"] and
-                    icc is not None
-                )
-                if not is_print_ready:
-                    notes.append("トンボ: 代替チェック - DPI/ICCプロファイル/カラーモードのいずれかが不足 -> ❌ 不合格")
-                    passed = False
-                else:
-                    notes.append("トンボ: 代替チェック - 印刷用メタデータは揃っています（OpenCVがあると検出できます）")
-        else:
-            if _HAS_CV2:
-                notes.append(f"トンボ: {'検出あり' if trim_detected else '検出なし'}" if trim_detected is not None else "トンボ: 検出不可")
-            else:
-                notes.append("トンボ: 未チェック (OpenCV未インストール)")
+            notes.append(
+                f"幅/高さ: 指定なし (検出={'不明' if width_mm is None else f'W{width_mm:.1f} x H{height_mm:.1f}mm'})"
+            )
 
     return ImageReport(
         path=file_name,
@@ -335,8 +281,6 @@ def analyze_image_file(
         color_family=family,
         has_alpha=has_alpha,
         icc_profile=icc,
-        trim_marks_detected=trim_detected,
-        trim_marks_score=trim_score,
         detected_extension=detected_ext,
         notes=notes,
         passed=passed
@@ -381,31 +325,6 @@ def report_to_styled_dict(cond: CheckConditions, report: ImageReport) -> Dict:
         size_passed = not size_exist
     size_badge = _get_status_badge(size_text, size_passed, size_exist)
 
-    trim_exist = cond.require_trim and not is_skipped
-    if trim_exist:
-        if report.trim_marks_detected is None and not _HAS_CV2:
-            # 代替チェック（簡易）
-            dpi_ok = (dpi_det is not None and dpi_det >= 300)
-            icc_ok = report.icc_profile is not None
-            if dpi_ok and icc_ok:
-                trim_badge = _get_status_badge("メタデータOK(要OpenCV)", True, True)
-            else:
-                trim_badge = _get_status_badge("メタデータ不足(要OpenCV)", False, True)
-        elif report.trim_marks_detected is None:
-            trim_badge = _get_status_badge("検出不可", False, True)
-        elif report.trim_marks_detected:
-            trim_badge = _get_status_badge(f"あり ({report.trim_marks_score:.2f})", True, True)
-        else:
-            trim_badge = _get_status_badge("なし", False, True)
-    else:
-        # 任意表示（合否に影響なし）
-        if report.trim_marks_detected is None:
-            trim_badge = _get_status_badge("未チェック", True, False)
-        elif report.trim_marks_detected:
-            trim_badge = _get_status_badge(f"検出あり ({report.trim_marks_score:.2f})", True, False)
-        else:
-            trim_badge = _get_status_badge("検出なし", True, False)
-
     warning_notes = []
     if report.has_alpha:
         warning_notes.append("透過(α)あり")
@@ -421,7 +340,6 @@ def report_to_styled_dict(cond: CheckConditions, report: ImageReport) -> Dict:
         "DPI": dpi_badge,
         "カラーモード": color_badge,
         "サイズ(mm)": size_badge,
-        "トンボ": trim_badge,
         "注意": " / ".join(warning_notes) if warning_notes else "-",
         "詳細メモ": notes_text
     }
@@ -433,7 +351,7 @@ def generate_bulk_csv_data(reports: List[ImageReport]) -> bytes:
     writer.writerow([
         "パス", "総合判定", "検出形式", "幅(px)", "高さ(px)", "DPI(x,y)", "幅(mm)", "高さ(mm)",
         "モード", "検出カラー", "透過", "ICCプロファイル",
-        "トンボ検出", "トンボスコア", "詳細メモ"
+        "詳細メモ"
     ])
     for report in reports:
         writer.writerow([
@@ -449,8 +367,6 @@ def generate_bulk_csv_data(reports: List[ImageReport]) -> bytes:
             report.color_family,
             "あり" if report.has_alpha else "なし",
             "あり" if report.icc_profile else "なし",
-            "あり" if report.trim_marks_detected else ("なし" if report.trim_marks_detected is False else "検出不可"),
-            f"{report.trim_marks_score:.3f}" if report.trim_marks_score is not None else "",
             " | ".join(report.notes)
         ])
     return ('\ufeff' + output.getvalue()).encode("utf-8")
@@ -489,7 +405,7 @@ st.sidebar.markdown("---")
 skip_all = st.sidebar.checkbox(
     "📝 全ての条件チェックを無効にする",
     value=False,
-    help="このチェックを有効にすると、DPI、サイズ、カラー、トンボの判定は行われず、形式チェックのみが適用されます。"
+    help="このチェックを有効にすると、DPI、サイズ、カラーの判定は行われず、形式チェックのみが適用されます。"
 )
 st.sidebar.markdown("---")
 
@@ -508,7 +424,7 @@ st.sidebar.subheader("条件設定 (無効にしない場合)")
 if skip_all:
     st.sidebar.markdown("> すべての条件チェックは無効です。")
     default_w, default_h = 0.0, 0.0
-    color, required_dpi, min_width, min_height, trim = None, None, 0.0, 0.0, False
+    color, required_dpi, min_width, min_height = None, None, 0.0, 0.0
     size_mode = SIZE_CHECK_MODE_BOTH
     allow_rot = False
     size_tolerance = 0.1
@@ -559,22 +475,17 @@ else:
         index=0,
     )
 
-    trim = st.sidebar.checkbox("トンボ必須", value=False)
-
 cond = CheckConditions(
     required_color=color,
     required_dpi=required_dpi,
     min_width_mm=min_width if min_width > 0 else None,
     min_height_mm=min_height if min_height > 0 else None,
-    require_trim=trim,
     allowed_extensions=set(selected_types),
     skip_all_checks=skip_all,
     size_check_mode=size_mode,
     allow_rotation=allow_rot,
     size_tolerance_mm=size_tolerance
 )
-
-st.sidebar.info(f"OpenCV: {'✅ インストール済み' if _HAS_CV2 else '❌ 未インストール (トンボ検出不可/代替判定)'}")
 
 # --- アップロード ---
 st.header("1. 画像ファイルのアップロード")
@@ -624,7 +535,7 @@ if uploaded_files:
         st.download_button(
             label="🔽 全ファイルの結果をCSVでダウンロード",
             data=csv_data,
-            file_name="bulk_file_check_report_v5_0_fixed.csv",
+            file_name="bulk_file_check_report.csv",
             mime="text/csv",
             type="primary"
         )
@@ -665,6 +576,3 @@ if uploaded_files:
         st.error("アップロードされたファイルで解析に成功したものはありませんでした。ファイル形式を確認してください。")
 else:
     st.info("ファイルをアップロードしてチェックを開始してください。")
-
-
-
